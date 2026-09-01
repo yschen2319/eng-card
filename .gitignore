@@ -1,0 +1,10 @@
+# Android signing keys and local signing properties
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+
+# Local Android/Gradle files
+.gradle/
+local.properties
+**/build/
