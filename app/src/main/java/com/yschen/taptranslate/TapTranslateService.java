@@ -25,31 +25,25 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.util.Locale;
 
 public class TapTranslateService extends AccessibilityService {
     private WindowManager wm;
     private TextView bubble;
     private View picker;
     private View card;
-    private boolean chromeForeground = false;
 
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         createBubble();
+        Toast.makeText(this, "点译已启动", Toast.LENGTH_SHORT).show();
     }
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        CharSequence pkg = event.getPackageName();
-        chromeForeground = pkg != null && "com.android.chrome".contentEquals(pkg);
-        if (bubble != null) bubble.setVisibility(chromeForeground ? View.VISIBLE : View.GONE);
-        if (!chromeForeground) {
-            removePicker();
-            removeCard();
-        }
+        // The bubble is intentionally global. We only inspect the active window
+        // after the user explicitly taps the bubble and then taps some text.
     }
 
     @Override
@@ -67,6 +61,8 @@ public class TapTranslateService extends AccessibilityService {
     }
 
     private void createBubble() {
+        if (bubble != null) return;
+
         bubble = new TextView(this);
         bubble.setText("译");
         bubble.setTextSize(18);
@@ -74,22 +70,30 @@ public class TapTranslateService extends AccessibilityService {
         bubble.setGravity(Gravity.CENTER);
         bubble.setBackgroundColor(Color.rgb(38, 38, 38));
         bubble.setElevation(dp(8));
-        bubble.setVisibility(View.GONE);
+        bubble.setVisibility(View.VISIBLE);
         bubble.setOnClickListener(v -> beginPick());
 
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 dp(48), dp(48),
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
         lp.x = dp(8);
-        wm.addView(bubble, lp);
+
+        try {
+            wm.addView(bubble, lp);
+        } catch (Exception e) {
+            bubble = null;
+            Toast.makeText(this, "悬浮球启动失败，请重新关闭并开启无障碍服务", Toast.LENGTH_LONG).show();
+        }
     }
 
     private void beginPick() {
-        if (!chromeForeground || picker != null) return;
+        if (picker != null) return;
         removeCard();
+
         picker = new View(this);
         picker.setBackgroundColor(Color.TRANSPARENT);
         picker.setOnTouchListener((v, e) -> {
@@ -97,9 +101,10 @@ public class TapTranslateService extends AccessibilityService {
                 float x = e.getRawX();
                 float y = e.getRawY();
                 removePicker();
+
                 String word = findWordAt(x, y);
                 if (word == null || word.isBlank()) {
-                    Toast.makeText(this, "这里没识别到英文单词", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "这里没识别到可翻译的英文单词", Toast.LENGTH_SHORT).show();
                 } else {
                     showCard(word, "翻译中…", x, y);
                     translate(word, x, y);
@@ -113,10 +118,17 @@ public class TapTranslateService extends AccessibilityService {
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.TOP | Gravity.START;
-        wm.addView(picker, lp);
+
+        try {
+            wm.addView(picker, lp);
+        } catch (Exception e) {
+            picker = null;
+            Toast.makeText(this, "无法进入取词模式", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private String findWordAt(float x, float y) {
@@ -146,30 +158,58 @@ public class TapTranslateService extends AccessibilityService {
         }
 
         CharSequence cs = node.getText();
-        if (cs == null || cs.length() == 0) return null;
+        if (cs == null || cs.length() == 0) {
+            CharSequence description = node.getContentDescription();
+            if (description == null) return null;
+            return singleEnglishWord(description.toString());
+        }
+
         String text = cs.toString();
         int len = Math.min(text.length(), 1000);
+        if (len <= 0) return null;
+
         Bundle args = new Bundle();
         args.putInt(AccessibilityNodeInfo.EXTRA_DATA_TEXT_CHARACTER_LOCATION_ARG_START_INDEX, 0);
         args.putInt(AccessibilityNodeInfo.EXTRA_DATA_TEXT_CHARACTER_LOCATION_ARG_LENGTH, len);
-        if (!node.refreshWithExtraData(AccessibilityNodeInfo.EXTRA_DATA_TEXT_CHARACTER_LOCATION_KEY, args)) return null;
-        Parcelable[] locs = node.getExtras().getParcelableArray(AccessibilityNodeInfo.EXTRA_DATA_TEXT_CHARACTER_LOCATION_KEY);
-        if (locs == null) return null;
+
+        if (!node.refreshWithExtraData(
+                AccessibilityNodeInfo.EXTRA_DATA_TEXT_CHARACTER_LOCATION_KEY, args)) {
+            return singleEnglishWord(text);
+        }
+
+        Parcelable[] locs = node.getExtras().getParcelableArray(
+                AccessibilityNodeInfo.EXTRA_DATA_TEXT_CHARACTER_LOCATION_KEY);
+        if (locs == null) return singleEnglishWord(text);
 
         int hit = -1;
         for (int i = 0; i < Math.min(locs.length, len); i++) {
             if (!(locs[i] instanceof RectF)) continue;
             RectF r = (RectF) locs[i];
-            if (r.contains(x, y)) { hit = i; break; }
+            if (r.contains(x, y)) {
+                hit = i;
+                break;
+            }
         }
-        if (hit < 0 || !isWordChar(text.charAt(hit))) return null;
+
+        if (hit < 0 || hit >= text.length() || !isWordChar(text.charAt(hit))) {
+            return null;
+        }
 
         int start = hit;
         int end = hit + 1;
         while (start > 0 && isWordChar(text.charAt(start - 1))) start--;
         while (end < text.length() && isWordChar(text.charAt(end))) end++;
-        String word = text.substring(start, end).replaceAll("^[\\-']+|[\\-']+$", "");
+
+        String word = text.substring(start, end)
+                .replaceAll("^[\\-']+|[\\-']+$", "");
         return word.matches(".*[A-Za-z].*") ? word : null;
+    }
+
+    private String singleEnglishWord(String text) {
+        if (text == null) return null;
+        String trimmed = text.trim();
+        if (trimmed.matches("[A-Za-z]+(?:['-][A-Za-z]+)*")) return trimmed;
+        return null;
     }
 
     private boolean isWordChar(char c) {
@@ -181,22 +221,27 @@ public class TapTranslateService extends AccessibilityService {
             String result;
             try {
                 String q = URLEncoder.encode(word, StandardCharsets.UTF_8.name());
-                URL url = new URL("https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-CN&dt=t&q=" + q);
+                URL url = new URL(
+                        "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-CN&dt=t&q=" + q);
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setConnectTimeout(6000);
                 conn.setReadTimeout(6000);
-                conn.setRequestProperty("User-Agent", "TapTranslate/0.1");
-                BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
+                conn.setRequestProperty("User-Agent", "TapTranslate/0.2");
+
+                BufferedReader br = new BufferedReader(
+                        new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
                 StringBuilder sb = new StringBuilder();
                 String line;
                 while ((line = br.readLine()) != null) sb.append(line);
                 br.close();
+
                 JSONArray outer = new JSONArray(sb.toString());
                 result = outer.getJSONArray(0).getJSONArray(0).getString(0);
                 if (result == null || result.isBlank()) result = "暂无翻译";
             } catch (Exception e) {
                 result = "翻译失败，请检查网络";
             }
+
             String finalResult = result;
             getMainExecutor().execute(() -> showCard(word, finalResult, x, y));
         }).start();
@@ -204,6 +249,7 @@ public class TapTranslateService extends AccessibilityService {
 
     private void showCard(String word, String translation, float x, float y) {
         removeCard();
+
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(16), dp(12), dp(16), dp(12));
@@ -223,6 +269,7 @@ public class TapTranslateService extends AccessibilityService {
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(-2, -2);
         tlp.topMargin = dp(4);
         box.addView(translated, tlp);
+
         box.setOnClickListener(v -> removeCard());
         card = box;
 
@@ -230,14 +277,21 @@ public class TapTranslateService extends AccessibilityService {
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 width, WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.TOP | Gravity.START;
+
         int screenW = getResources().getDisplayMetrics().widthPixels;
         int screenH = getResources().getDisplayMetrics().heightPixels;
         lp.x = Math.max(dp(8), Math.min((int) x - width / 2, screenW - width - dp(8)));
         lp.y = Math.max(dp(8), Math.min((int) y + dp(16), screenH - dp(130)));
-        wm.addView(card, lp);
+
+        try {
+            wm.addView(card, lp);
+        } catch (Exception e) {
+            card = null;
+        }
     }
 
     private void removePicker() {
