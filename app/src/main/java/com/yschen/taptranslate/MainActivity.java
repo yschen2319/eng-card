@@ -6,7 +6,6 @@ import android.graphics.Color;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.view.Gravity;
-import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -27,30 +26,38 @@ public class MainActivity extends Activity {
         title.setTextSize(30);
         title.setTextColor(Color.BLACK);
         title.setGravity(Gravity.CENTER);
-        root.addView(title, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView body = new TextView(this);
-        body.setText("Chrome 点词翻译\n\n1. 开启无障碍服务\n2. 回到 Chrome\n3. 点右侧“译”悬浮球\n4. 再点网页里的英文单词");
+        body.setText("全局点词翻译\n\n1. 开启无障碍服务\n2. 看到屏幕右侧“译”悬浮球\n3. 点一下“译”\n4. 再点当前 App 里的英文单词");
         body.setTextSize(17);
         body.setTextColor(Color.DKGRAY);
         body.setLineSpacing(0, 1.25f);
-        LinearLayout.LayoutParams bodyLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams bodyLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
         bodyLp.topMargin = dp(28);
         root.addView(body, bodyLp);
 
         Button button = new Button(this);
         button.setText("开启无障碍服务");
         button.setAllCaps(false);
-        button.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
-        LinearLayout.LayoutParams buttonLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52));
+        button.setOnClickListener(v ->
+                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+        LinearLayout.LayoutParams buttonLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(52));
         buttonLp.topMargin = dp(32);
         root.addView(button, buttonLp);
 
         TextView privacy = new TextView(this);
-        privacy.setText("仅在 Chrome 前台响应。不会读取历史记录、密码、Cookie 或账号；单词会发送到 Google 翻译服务。\n\nv0.1.0");
+        privacy.setText("仅在你主动点“译”并点取文字时读取当前屏幕的无障碍文本；不会读取历史记录、密码、Cookie 或账号。待翻译内容会发送到 Google 翻译服务。\n\nv0.2.0");
         privacy.setTextSize(13);
         privacy.setTextColor(Color.GRAY);
-        LinearLayout.LayoutParams privacyLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams privacyLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
         privacyLp.topMargin = dp(28);
         root.addView(privacy, privacyLp);
 
